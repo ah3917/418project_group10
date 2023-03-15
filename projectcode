@@ -1,0 +1,302 @@
+# Packages
+#install.packages("xgboost")
+library(xgboost)
+library(dplyr)
+
+movie <- read.csv("movie_metadata.csv")
+# NOTES:
+# y var= imbd rating 
+# x vars- duration, budget, genre, content rating 
+
+
+# Filtering for the columns we want 
+movies_filter<-movie[,c("genres", "content_rating", "budget", "duration", "imdb_score")]
+dim(movies_filter)
+
+# Remove NAs from the columns we want 
+movie_omit<-na.omit(movies_filter)
+dim(movie_omit)
+
+# Summary stats
+head(movie_omit)
+str(movie_omit)
+summary(movie_omit$duration)
+quantile(movie_omit$duration)
+
+######Classifying duration as categorical
+# 94 and under, 95-104, 105-119, 120+
+movie_omit$duration_2 <- as.factor(ifelse(movie_omit$duration <= 95, 'Short',
+                                          ifelse(movie_omit$duration <= 104, 'Medium', 
+                                                 ifelse(movie_omit$duration <= 119, 'Long', 
+                                                        ifelse(movie_omit$duration > 120, 'XLong', 'not_found')))))
+head(movie_omit)
+
+
+######## Classifying genre as categorical 
+unique(movie_omit$genres)
+
+movie_omit$genre_2 <- sub("\\|.*", "", movie_omit$genres)
+head(movie_omit, 40)
+unique(movie_omit$genre_2)
+
+
+
+# horror/thriller/mystery/crime
+# scifi/fantasy
+# action/adventure/western
+# biography/documenary
+# animation/family
+table(movie_omit$genre_2)
+
+# keeping (10):
+# action
+# adventure
+# animation
+# bio
+# comedy
+# crime
+# documentary
+# drama
+# fantasy
+# horror 
+
+# combine: 
+# action/adventure/crime
+# bio/doc
+# keep comedy as is 
+# keep horror as is 
+# keep drama as is 
+# keep animation as is 
+# keep fantasy as is 
+
+movie_omit<-movie_omit[movie_omit$genre_2 != "Family" & movie_omit$genre_2 != "Film-Noir" & movie_omit$genre_2 != "Game-Show" & movie_omit$genre_2 != "Musical" & movie_omit$genre_2 != "Romance"
+                       & movie_omit$genre_2 != "Sci-Fi" & movie_omit$genre_2 != "Thriller"& movie_omit$genre_2 != "Western"  & movie_omit$genre_2 != "Mystery" , ]  
+head(movie_omit,60)
+
+
+
+movie_omit$genre_3<- as.factor(ifelse(movie_omit$genre_2 == "Adventure" | movie_omit$genre_2 == "Action" | movie_omit$genre_2 == "Crime", 'ACTION',
+                                      ifelse(movie_omit$genre_2 == "Biography" | movie_omit$genre_2 == "Documentary" , 'DOCUMENTARY', movie_omit$genre_2)))
+head(movie_omit, 50)                                      
+unique(movie_omit$genre_3)
+
+
+##### Classifying Budget 
+head(movie_omit$budget)
+summary(movie_omit$budget)
+
+# < 6 MILLION, <= 20 MILLION, <= 45 MILLION, > 45  MILLION
+
+
+movie_omit$budget_2 <- as.factor(ifelse(movie_omit$budget <= 6000000, '<6M',
+                                        ifelse(movie_omit$budget  <= 20000000 , '<20M', 
+                                               ifelse(movie_omit$budget  <= 45000000, '<45M', 
+                                                      ifelse(movie_omit$budget > 45000000, '>45M', 'not_found')))))
+
+table(movie_omit$budget_2)
+
+
+
+table(movie_omit$content_rating)
+unique(movie_omit$content_rating)
+
+
+####### Content Rating Classifying 
+# REMOVE: 
+# combine unrated and not rated 
+# keep PG
+# keep G
+# Keep R
+# keep pg-13
+
+movie_omit$content_rating_2 <- as.factor(ifelse(movie_omit$content_rating == 'Not Rated', 'Unrated', movie_omit$content_rating))
+
+movie_omit<-movie_omit[movie_omit$content_rating_2 == "PG" |
+                         movie_omit$content_rating_2 == "Unrated" | 
+                         movie_omit$content_rating_2 == "G" | 
+                         movie_omit$content_rating_2 == "R" |
+                         movie_omit$content_rating_2 == "PG-13", ]
+table(movie_omit$content_rating_2)
+
+movie_omit<-movie_omit[movie_omit$content_rating_2 != "GP" & movie_omit$content_rating_2 != "M" & movie_omit$content_rating_2 != "NC-17" & movie_omit$content_rating_2 != "Passed" & movie_omit$content_rating_2 != "TV-14"
+                       & movie_omit$content_rating_2 != "TV-MA" & movie_omit$content_rating_2 != "TV_PG"& movie_omit$content_rating_2 != "X"  , ]  
+
+table(movie_omit$content_rating)  
+
+
+
+### model 
+head(movie_omit)
+# keep cols that only we want 
+movie_final<-movie_omit[,c("imdb_score", "duration_2", "genre_3", "budget_2", "content_rating_2")]
+head(movie_final)
+
+
+#install.packages("caTools")
+library(caTools)
+#install.packages("party")
+library(party)
+library(dplyr)
+#install.packages("magrittr")
+library(magrittr)
+#install.packages("randomForest")
+library(randomForest)
+library(caret)
+library(e1071)
+#install.packages("naivebayes")
+library(naivebayes)
+#install.packages("sp")
+library(sp)
+#install.packages("raster")
+library(raster)
+#install.packages("usdm")
+library(usdm)
+library(rpart)
+
+# Data Partition
+set.seed(111)
+ind<-sample(2,nrow(movie_final), replace = T, prob = c(0.7,0.3))
+train<-movie_final[ind == 1,]
+test<-movie_final[ind == 2,]
+
+# Fit decision tree
+fit_dec<-rpart(imdb_score~., data = train, method = 'class')
+
+
+# Make prediction
+predict_unseen<-predict(fit_dec, test, type = 'class')
+predict_unseen
+
+table_mat<-table(test$imdb_score, predict_unseen)
+table_mat
+
+# Accuracy
+accuracy_test<-sum(diag(table_mat)) / sum(table_mat)
+print(paste('Accuracy for test', accuracy_test))
+
+
+# Tune the hyper-parameters- 
+set.seed(123)
+accuracy_tune <- function(fit) {
+  predict_unseen <- predict(fit, test, type = 'class')
+  table_mat <- table(test$imdb_score, predict_unseen)
+  accuracy_test <- sum(diag(table_mat)) / sum(table_mat)
+  accuracy_test
+}
+
+control <- rpart.control(minsplit = 4,
+                         minbucket = round(5/3),
+                         maxdepth = 3,
+                         cp = 0)
+tune_fit <- rpart(imdb_score~., data = train, method = 'class', control = control)
+accuracy_tune(tune_fit)
+
+# Save model to RDS file
+saveRDS(tune_fit, "model.rds")
+
+# Import libraries
+library(shiny)
+library(data.table)
+library(randomForest)
+
+# Read in the RF model
+model <- readRDS("model.rds")
+
+
+####################################
+# User interface                   #
+####################################
+
+ui <- fluidPage(
+                
+                # Page header
+                headerPanel('IMDB Score Predictor'),
+                
+                # Input values
+                sidebarPanel(
+                  HTML("<h3>Input parameters</h3>"),
+                  
+                  selectInput("duration_2", label = "Duration:", 
+                              choices = unique(movie_final$duration_2),
+                              selected = "Medium"),
+                  selectInput("genre_3", label = "Genre:", 
+                              choices = unique(movie_final$genre_3),
+                              selected = "Comedy"),
+                  selectInput("budget_2", label = "Budget:", 
+                              choices = unique(movie_final$budget_2),
+                              selected = "<20M"),
+                  selectInput("content_rating_2", label = "Content Rating:", 
+                              choices = unique(movie_final$content_rating_2),
+                              selected = "PG"),
+                  
+                  actionButton("submitbutton", "Submit", class = "btn btn-primary")
+                ),
+                
+                mainPanel(
+                  tags$label(h3('Output')), # Status/Output Text Box
+                  verbatimTextOutput('contents'),
+                  tableOutput('tabledata') # Prediction results table
+                  
+                )
+)
+
+
+####################################
+# Server                           #
+####################################
+
+server <- function(input, output, session) {
+  
+  # Input Data
+  datasetInput <- reactive({  
+    
+    df <- data.frame(
+      Name = c("duration_2",
+               "genre_3",
+               "budget_2",
+               "content_rating_2"),
+      Value = as.character(c(input$duration_2,
+                             input$genre_3,
+                             input$budget_2,
+                             input$content_rating_2)),
+      stringsAsFactors = FALSE)
+    
+    score <- "score"
+    df <- rbind(df, score)
+    input <- transpose(df)
+    write.table(input,"input.csv", sep=",", quote = FALSE, row.names = FALSE, col.names = FALSE)
+    
+    test <- read.csv(paste("input", ".csv", sep=""), header = TRUE)
+  
+    test$genre_3 <- factor(test$genre_3, levels = c("ACTION", "Drama", "Animation", "Comedy", "DOCUMENTARY", "Fantasy", "Horror"))
+    test$budget_2 <- factor(test$budget_2, levels = c(">45M", "<45M", "<20M", "<6M"))
+    test$content_rating_2 <- factor(test$content_rating_2, levels = c("PG-13", "PG", "G", "R", "Unrated"))
+    
+    output <- data.frame(Prediction=predict(model,test,type="class"))
+    print(output)
+    
+  })
+  
+  # Status/Output Text Box
+  output$contents <- renderPrint({
+    if (input$submitbutton>0) { 
+      isolate("Calculation complete.") 
+    } else {
+      return("Server is ready for calculation.")
+    }
+  })
+  
+  # Prediction results table
+  output$tabledata <- renderTable({
+    if (input$submitbutton>0) { 
+      isolate(datasetInput()) 
+    } 
+  })
+  
+}
+
+####################################
+# Create the shiny app             #
+####################################
+shinyApp(ui = ui, server = server)
+
